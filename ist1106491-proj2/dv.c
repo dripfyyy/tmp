@@ -122,13 +122,13 @@ void update(state_t *state) {
     for (int i = get_first_node(); i <= get_last_node(); i++) {
       // warns only its neighbours
       if (i != get_current_node() && get_link_cost(i) != COST_INFINITY) {
-        message_t *m = (message_t*)malloc(sizeof(message_t));
+        data_t *m = (data_t*)malloc(sizeof(data_t));
 
         for (int j = get_first_node(); j <= get_last_node(); j++) {
           m->data[j] = state->cost[get_current_node()][j];
         }
 
-        send_message(i, m, sizeof(message_t));
+        send_message(i, m, sizeof(data_t));
       }
     }
   }
@@ -142,9 +142,9 @@ void notify_link_change(node_t neighbor, cost_t new_cost) {
 }
 
 // Receive a message sent by a neighboring node.
-void notify_receive_message(node_t sender, void *message, int size) {
+void notify_receive_message(node_t sender, void *message, size_t size) {
   state_t *state = (state_t *)get_state();
-  message_t *m = (message_t*)message;
+  data_t *m = (data_t*)message;
 
   // Update route costs
   for (int i = get_first_node(); i <= get_last_node(); i++) {
