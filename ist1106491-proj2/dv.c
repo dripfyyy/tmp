@@ -1,155 +1,116 @@
 /******************************************************************************\
 * Distance vector routing protocol without reverse path poisoning.             *
 \******************************************************************************/
-/*
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
+#include <stdlib.h>
 #include "routing-simulator.h"
 
-// Message format to send between nodes.
-typedef struct {
+// Structure to represent messages exchanged between nodes
+typedef struct data_t {
+  cost_t data[MAX_NODES];
 } data_t;
 
-// State format.
+// Structure to hold the state of a node
 typedef struct state_t {
   cost_t cost[MAX_NODES][MAX_NODES];
   node_t next_hop[MAX_NODES];
 } state_t;
 
-// Handler for the node to allocate and initialize its state.
+// Function to allocate and initialize a node's state
 state_t *init_state() {
-  state_t *state = (state_t *)calloc(1, sizeof(state_t));
-  return state;
-}
+  state_t *node_state = (state_t *)malloc(sizeof(state_t));
 
-// Notify a node that a neighboring link has changed cost.
-void notify_link_change(node_t neighbor, cost_t new_cost) {}
+  int start_node = get_first_node();
+  int end_node = get_last_node();
 
-// Receive a message sent by a neighboring node.
-void notify_receive_message(node_t sender, void *message, size_t length) {}
-
-*/
-/******************************************************************************\
-* Distance vector routing protocol without reverse path poisoning.             *
-\******************************************************************************/
-
-#include <stdlib.h>
-
-#include "routing-simulator.h"
-
-// Message format to send between nodes.
-typedef struct data_t{
-  cost_t data[MAX_NODES];
-} data_t;
-
-// State format.
-typedef struct state_t{
-  cost_t cost[MAX_NODES][MAX_NODES];
-  node_t next_hop[MAX_NODES];
-} state_t;
-
-// Handler for the node to allocate and initialize its state.
-state_t *init_state() {
-  state_t *state = (state_t *)calloc(1, sizeof(state_t));
-
-  for (int i = get_first_node(); i <= get_last_node(); i++) {
-    for (int j = get_first_node(); j <= get_last_node(); j++) {
-
-      if (i == j) {
-        state->cost[i][j] = 0;
-      }
-      else {
-        state->cost[i][j] = COST_INFINITY;
+  for (int src = start_node; src <= end_node; src++) {
+    for (int dest = start_node; dest <= end_node; dest++) {
+      if (src == dest) {
+        node_state->cost[src][dest] = 0; // Distance to self is 0
+      } else {
+        node_state->cost[src][dest] = COST_INFINITY; // Initially unreachable
       }
     }
-
-    state->next_hop[i] = -1;
+    node_state->next_hop[src] = -1; // No forwarding information
   }
-  return state;
+  return node_state;
 }
 
-int bellmond_ford(state_t *state) {
-  int change = 0;
+// Implementation of the Bellman-Ford algorithm
+int compute_routes(state_t *node_state) {
+  int has_changes = 0;
 
-  // for every destination possible
-  for (int i = get_first_node(); i <= get_last_node(); i++) {
-    // ignoring itself
-    if (i != get_current_node()) {
-      // checks through which neighbour it costs less
-      cost_t min = COST_INFINITY;
-      node_t next_hop = -1;
+  int current = get_current_node();
+  int first = get_first_node();
+  int last = get_last_node();
 
-      for (int j = get_first_node(); j <= get_last_node(); j++) {
-        // checks only through neighbours
-        if (j != get_current_node() && get_link_cost(j) != COST_INFINITY) {
-          
-          // calculates the minimum cost
-          // the cost of getting to the neigbour and from the neighbour to the destination
-          cost_t cost = COST_ADD(get_link_cost(j), state->cost[j][i]);
+  for (int destination = first; destination <= last; destination++) {
+    if (destination != current) {
+      cost_t shortest_distance = COST_INFINITY;
+      node_t best_next_hop = -1;
 
-          // checks to see if it is a minimum
-          if (cost < min) {
-            min = cost;
-            next_hop = j;
+      for (int neighbor = first; neighbor <= last; neighbor++) {
+        if (neighbor != current && get_link_cost(neighbor) != COST_INFINITY) {
+          cost_t total_cost = COST_ADD(get_link_cost(neighbor), node_state->cost[neighbor][destination]);
+
+          if (total_cost < shortest_distance) {
+            shortest_distance = total_cost;
+            best_next_hop = neighbor;
           }
         }
       }
 
-      // check if anything changed
-      if (min != state->cost[get_current_node()][i]) {
-        // update locally
-        state->cost[get_current_node()][i] = min;
-        state->next_hop[i] = next_hop;
-        // set route
-        set_route(i, next_hop, min);
-        change = 1; // There was change
-      }
-      else {
-        set_route(i, next_hop, min);
+      if (node_state->cost[current][destination] != shortest_distance) {
+        node_state->cost[current][destination] = shortest_distance;
+        node_state->next_hop[destination] = best_next_hop;
+        set_route(destination, best_next_hop, shortest_distance);
+        has_changes = 1;
+      } else {
+        set_route(destination, best_next_hop, shortest_distance);
       }
     }
   }
-  return change; // There was no change
+  return has_changes;
 }
 
-void update(state_t *state) {
-  // runs Bellmon Ford and notifies neighbours if there was a change
-  if (bellmond_ford(state)) {
-    // checks all the nodes 
-    for (int i = get_first_node(); i <= get_last_node(); i++) {
-      // warns only its neighbours
-      if (i != get_current_node() && get_link_cost(i) != COST_INFINITY) {
-        data_t *m = (data_t*)malloc(sizeof(data_t));
+// Notify neighboring nodes of changes
+void broadcast_updates(state_t *node_state) {
+  if (compute_routes(node_state)) {
+    int start = get_first_node();
+    int stop = get_last_node();
+    int current_node = get_current_node();
 
-        for (int j = get_first_node(); j <= get_last_node(); j++) {
-          m->data[j] = state->cost[get_current_node()][j];
+    for (int neighbor = start; neighbor <= stop; neighbor++) {
+      if (neighbor != current_node && get_link_cost(neighbor) != COST_INFINITY) {
+        data_t *update_message = (data_t *)malloc(sizeof(data_t));
+
+        for (int destination = start; destination <= stop; destination++) {
+          update_message->data[destination] = node_state->cost[current_node][destination];
         }
 
-        send_message(i, m, sizeof(data_t));
+        send_message(neighbor, update_message, sizeof(data_t));
       }
     }
   }
 }
 
-// Notify a node that a neighboring link has changed cost.
+// Handle link cost changes
 void notify_link_change(node_t neighbor, cost_t new_cost) {
-  state_t *state = (state_t *)get_state();
-
-  update(state);
+  state_t *node_state = (state_t *)get_state();
+  broadcast_updates(node_state);
 }
 
-// Receive a message sent by a neighboring node.
+// Handle incoming messages from neighbors
 void notify_receive_message(node_t sender, void *message, size_t size) {
-  state_t *state = (state_t *)get_state();
-  data_t *m = (data_t*)message;
+  state_t *node_state = (state_t *)get_state();
+  data_t *received_message = (data_t *)message;
 
-  // Update route costs
-  for (int i = get_first_node(); i <= get_last_node(); i++) {
-    state->cost[sender][i] = m->data[i];
+  int first_node = get_first_node();
+  int last_node = get_last_node();
+
+  for (int destination = first_node; destination <= last_node; destination++) {
+    node_state->cost[sender][destination] = received_message->data[destination];
   }
 
-  update(state);
+  broadcast_updates(node_state);
 }
